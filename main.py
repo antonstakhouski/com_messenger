@@ -10,10 +10,9 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE."""
 
-#!/usr/bin/env python
+# !/usr/bin/env python
 
-
-from PyQt5.QtCore import Qt, QByteArray, QIODevice
+from PyQt5.QtCore import Qt, QIODevice
 from PyQt5.QtWidgets import QGridLayout, QLabel, QRadioButton, QTextEdit, QWidget, QTextBrowser, QPushButton, \
     QVBoxLayout
 from PyQt5.QtSerialPort import QSerialPort
@@ -82,9 +81,14 @@ class COMportMessenger(QWidget):
         self.sender_name = "/dev/tnt1"
         self.receiver_name = "/dev/tnt0"
 
+        # special params for forming packets
         self.flag = "F"
         self.data_size = 7
         self.fcc = "9"
+        self.escape = "E"
+        self.flag_replacement = "R"
+        self.not_flag_replacement = "N"
+        self.placeholder = 0
 
     # sender/receiver mode switch
     def handle_radio_button(self):
@@ -109,6 +113,23 @@ class COMportMessenger(QWidget):
             self.com.open(QIODevice.ReadOnly)
         self.debug_text.append("Port was initialized")
 
+    def byte_stuffing_encapsulation(self, packet):
+        i = 1
+        length = len(packet)
+        while i < length:
+            if packet[i] == self.flag:
+                packet = packet[:i] + packet[i:].replace(packet[i], self.escape + self.flag_replacement, 1)
+                i += 2
+                print(packet)
+                continue
+            if packet[i] == self.escape:
+                packet = packet[:i] + packet[i:].replace(packet[i], self.escape + self.not_flag_replacement, 1)
+                i += 2
+                print(packet)
+                continue
+            i += 1
+        return packet
+
     # send message button handle
     def handle_send_button(self):
         if self.button.isChecked():
@@ -118,9 +139,7 @@ class COMportMessenger(QWidget):
                 # get first self.data_size symbols
                 text_tmp = text[:self.data_size]
                 packet = str(self.flag)
-                # destination
                 packet += self.receiver_name[-1:]
-                # source
                 packet += self.sender_name[-1:]
                 # cut first self.data_size symbols
                 text = text[self.data_size:]
@@ -131,28 +150,68 @@ class COMportMessenger(QWidget):
                 if len(text_tmp) < self.data_size:
                     i = len(text_tmp)
                     while i < self.data_size:
-                        packet += str(0)
+                        packet += str(chr(self.placeholder))
                         i += 1
                 # add fcc
                 packet += self.fcc
                 self.debug_text.append(packet)
+                packet = self.byte_stuffing_encapsulation(packet)
+                self.debug_text.append(packet)
                 # send packet
+                self.debug_text.append(str(len(packet)))
                 self.com.writeData(bytes(packet, 'utf8'))
             self.input_text.clear()
+
+    def byte_stuffing_decapsulation(self, packet_list):
+        new_packet_list = list()
+        for packet in packet_list:
+            print(packet)
+            length = len(packet)
+            packet = packet[1:].replace(self.escape + self.flag_replacement, self.flag, length)
+            packet = packet[1:].replace(self.escape + self.not_flag_replacement, self.escape, length)
+            new_packet_list.append(str(packet))
+            self.debug_text.append(packet)
+        print("lol")
+        print(new_packet_list)
+        return new_packet_list
 
     # receive message button handle
     def handle_receive_button(self):
         if not self.button.isChecked():
             ba = self.com.readAll()
             string = str(ba, 'utf-8')
-            # self.output_text.append(string)
-            print(string)
             if len(string) > 0:
-                if string[0] == self.flag:
-                    if string[1] == self.receiver_name[-1:]:
-                        string = string[3:-1]
-                        print(string)
-                        self.output_text.append(string)
+                # remove first incomplete packet
+                index = string.index(self.flag)
+                string = string[index:]
+                string_list = string.split(self.flag, len(string))
+                self.debug_text.append(str(len(string)))
+                #string_list = self.byte_stuffing_decapsulation(string_list)
+                megastring = str()
+
+                for packet in string_list:
+                    self.debug_text.append(packet)
+                    length = len(packet)
+                    if length > 0:
+                        string = packet[0] + packet[1:].replace(self.escape + self.flag_replacement, self.flag, length)
+                        # packet =
+                        string = \
+                            string[0] + string[1:].replace(self.escape + self.not_flag_replacement, self.escape, length)
+                        self.debug_text.append(string)
+                        if string[0] == self.receiver_name[-1:]:
+                            string = string[2:-1]
+                            print(string)
+                            megastring += string
+                self.output_text.append(megastring)
+
+
+                """for string in string_list:
+                    if len(string) > 0:
+                        if string[0] == self.receiver_name[-1:]:
+                            string = string[2:-1]
+                            print(string)
+                            megastring += string
+                self.output_text.append(megastring)"""
 
 
 if __name__ == '__main__':
