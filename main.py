@@ -1,20 +1,8 @@
-""" MIT License
-
-    Copyright (c) 2016 Anton Stakhouski
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE."""
-
 # !/usr/bin/env python
 
 from PyQt5.QtCore import Qt, QIODevice
 from PyQt5.QtWidgets import QGridLayout, QLabel, QRadioButton, QTextEdit, QWidget, QTextBrowser, QPushButton, \
-    QVBoxLayout
+    QVBoxLayout, QLineEdit
 from PyQt5.QtSerialPort import QSerialPort
 
 
@@ -22,9 +10,26 @@ class COMportMessenger(QWidget):
     def __init__(self, parent=None):
         super(COMportMessenger, self).__init__(parent)
 
+        self.sender_name = "/dev/tnt1"
+        self.receiver_name = "/dev/tnt0"
+
+        # special params for forming packets
+        self.flag = "F"
+        self.data_size = 7
+        self.fcs = "9"
+        self.escape = "E"
+        self.flag_replacement = "R"
+        self.not_flag_replacement = "N"
+        self.placeholder = 0
+        self.receiver_address = "0"
+
         # widget initialization
         input_label = QLabel("Input area:")
         self.input_text = QTextEdit()
+
+        # set receiver/sender port
+        self.com_pair_label = QLabel("Receiver address(1 byte)[For sender mode only]:")
+        self.com_pair_text = QLineEdit("0")
 
         output_label = QLabel("Output area:")
         self.output_text = QTextBrowser()
@@ -44,7 +49,8 @@ class COMportMessenger(QWidget):
         debug_label = QLabel("Debug info:")
         self.debug_text = QTextBrowser()
 
-        self.button = QRadioButton("On - sender mode, off - receiver mode")
+        self.button = QRadioButton("On - sender mode " + self.sender_name
+                                   + ", off - receiver mode " + self.receiver_name)
         self.button.toggled.connect(self.handle_radio_button)
 
         # grid layout initialisation
@@ -62,6 +68,8 @@ class COMportMessenger(QWidget):
         # debug info adding
         vbox_debug_text = QVBoxLayout()
         vbox_debug_text.addWidget(self.debug_text)
+        vbox_debug_text.addWidget(self.com_pair_label)
+        vbox_debug_text.addWidget(self.com_pair_text)
 
         # main layout
         main_layout = QGridLayout()
@@ -78,29 +86,21 @@ class COMportMessenger(QWidget):
         self.com.setStopBits(QSerialPort.OneStop)
         self.com.setParity(QSerialPort.EvenParity)
 
-        self.sender_name = "/dev/tnt1"
-        self.receiver_name = "/dev/tnt0"
-
-        # special params for forming packets
-        self.flag = "F"
-        self.data_size = 7
-        self.fcc = "9"
-        self.escape = "E"
-        self.flag_replacement = "R"
-        self.not_flag_replacement = "N"
-        self.placeholder = 0
-
     # sender/receiver mode switch
     def handle_radio_button(self):
         if self.button.isChecked():
             if self.com.isOpen():
                 self.com.close()
+            # self.com_pair_label = "Receiver port:"
             self.com.setPortName(self.sender_name)
+            # self.com_pair_text = self.receiver_name
             self.com.open(QIODevice.WriteOnly)
         else:
             if self.com.isOpen():
                 self.com.close()
+            # self.com_pair_label = "Sender port:"
             self.com.setPortName(self.receiver_name)
+            # self.com_pair_text = self.sender_name
             self.com.open(QIODevice.ReadOnly)
 
     # port initialization and opening
@@ -108,9 +108,12 @@ class COMportMessenger(QWidget):
         if self.button.isChecked():
             self.com.setPortName(self.sender_name)
             self.com.open(QIODevice.WriteOnly)
+            self.receiver_address = self.com_pair_text.text()[:1]
+            self.receiver_name = self.receiver_name[:-1] + self.receiver_address
         else:
             self.com.setPortName(self.receiver_name)
             self.com.open(QIODevice.ReadOnly)
+            self.sender_name = self.com_pair_text.text()
         self.debug_text.append("Port was initialized")
 
     def byte_stuffing_encapsulation(self, packet):
@@ -137,7 +140,7 @@ class COMportMessenger(QWidget):
                 # get first self.data_size symbols
                 text_tmp = text[:self.data_size]
                 packet = str(self.flag)
-                packet += self.receiver_name[-1:]
+                packet += self.receiver_address
                 packet += self.sender_name[-1:]
                 # cut first self.data_size symbols
                 text = text[self.data_size:]
@@ -150,8 +153,8 @@ class COMportMessenger(QWidget):
                     while i < self.data_size:
                         packet += str(chr(self.placeholder))
                         i += 1
-                # add fcc
-                packet += self.fcc
+                # add fcs
+                packet += self.fcs
                 self.debug_text.append(packet)
                 packet = self.byte_stuffing_encapsulation(packet)
                 self.debug_text.append(packet)
@@ -182,7 +185,7 @@ class COMportMessenger(QWidget):
                         string = \
                             string[0] + string[1:].replace(self.escape + self.not_flag_replacement, self.escape, length)
                         if string[0] == self.receiver_name[-1:]:
-                            # cut off receiver, source, fcc
+                            # cut off receiver, source, fcs
                             string = string[2:-1]
                             megastring += string
                 self.output_text.append(megastring)
