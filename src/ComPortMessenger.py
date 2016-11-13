@@ -68,7 +68,6 @@ class ComPortMessenger(QWidget):
         self.slot_time = int((self.collision_window + self.jam_signal_time) * 1.25)
         self.max_tries = 10
         self.jam_signal = bytes(str(chr(7)), CODING)
-        self.escape_signal = bytes(str(chr(6)), CODING)
         self.previous_byte = int()
         self.output_string = str()
         self.try_counter = int()
@@ -129,7 +128,6 @@ class ComPortMessenger(QWidget):
                     self.handle_collision()
                 else:
                     successful_transfer = True
-        self.com.writeData(self.escape_signal)
 
     def handle_collision(self):
         self.debug_text.append("x")
@@ -157,20 +155,18 @@ class ComPortMessenger(QWidget):
             self.receive_message(byte_array)
 
     def receive_message(self, byte_array):
-        no_previous_byte = True
+        bad_previous_byte = True
         for new_byte in byte_array:
             if new_byte == self.jam_signal[0]:
-                no_previous_byte = True
+                bad_previous_byte = True
                 continue
-            if new_byte == self.escape_signal[0]:
-                if not no_previous_byte:
-                    self.output_string += chr(self.previous_byte)
-                no_previous_byte = True
             # if we have an ordinary byte
             else:
-                if not no_previous_byte:
+                if not bad_previous_byte:
                     self.output_string += chr(self.previous_byte)
                 else:
-                    no_previous_byte = False
+                    bad_previous_byte = False
                 self.previous_byte = new_byte
+        self.output_string += chr(self.previous_byte)
         self.output_text.append(self.output_string)
+
